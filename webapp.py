@@ -11,15 +11,13 @@ import streamlit as st
 import yfinance as yf
 
 # -------------------------------------------------------------------
-# Environment + logging safety
+# Environment safety
 # -------------------------------------------------------------------
-# Prevent yfinance from attempting SciPy-dependent repair paths
 os.environ["YFINANCE_NO_SCI"] = "1"
-
 logging.getLogger("yfinance").setLevel(logging.CRITICAL)
 
 # -------------------------------------------------------------------
-# App config
+# Streamlit config
 # -------------------------------------------------------------------
 st.set_page_config(
     page_title="Commodities Dashboard",
@@ -27,7 +25,7 @@ st.set_page_config(
 )
 
 st.title("📈 Commodities Dashboard")
-st.caption("Data: Yahoo Finance (via yfinance) • Interactive charts via Plotly")
+st.caption("Yahoo Finance (via yfinance) • Interactive charts via Plotly")
 
 # -------------------------------------------------------------------
 # Tickers
@@ -59,16 +57,15 @@ PERIOD_MAP = {
 INTERVAL_MAP = {
     "Daily": "1d",
     "Hourly": "1h",
-    "15 min": "15m",
 }
 
 # -------------------------------------------------------------------
-# Sidebar controls
+# Sidebar
 # -------------------------------------------------------------------
 with st.sidebar:
     st.header("Controls")
 
-    label = st.selectbox("Commodity", list(COMMODITIES.keys()), index=0)
+    label = st.selectbox("Commodity", list(COMMODITIES.keys()))
     period_ui = st.selectbox("Period", list(PERIOD_MAP.keys()), index=2)
     interval_ui = st.selectbox("Interval", list(INTERVAL_MAP.keys()), index=0)
 
@@ -79,101 +76,62 @@ ticker = COMMODITIES[label]
 period = PERIOD_MAP[period_ui]
 interval = INTERVAL_MAP[interval_ui]
 
-# Yahoo limitation: intraday only works for recent windows
-if interval in {"15m", "1h"} and period not in {"1mo", "3mo"}:
-    st.warning("Intraday intervals only support recent windows on Yahoo. Switching to 3M.")
-    period = "3mo"
-
 # -------------------------------------------------------------------
-# Data fetching
+# Data fetch
 # -------------------------------------------------------------------
 @st.cache_data(ttl=60)
 def fetch_history(ticker: str, period: str, interval: str) -> pd.DataFrame:
-    try:
-        df = yf.download(
-            tickers=ticker,
-            period=period,
-            interval=interval,
-            auto_adjust=False,
-            actions=False,
-            progress=False,
-            threads=True,
-        )
-    except Exception as e:
-        out = pd.DataFrame()
-        out.attrs["error"] = str(e)
-        return out
-
+    df = yf.download(
+        ticker,
+        period=period,
+        interval=interval,
+        auto_adjust=False,
+        progress=False,
+    )
     if df is None or df.empty:
         return pd.DataFrame()
+    df = df.reset_index()
+    df["Date"] = pd.to_datetime(df["Date"], utc=True)
+    return df.dropna()
 
-    return df.dropna(how="all")
-
-with st.spinner(f"Loading {label} ({ticker}) • period={period_ui} • interval={interval_ui}"):
+with st.spinner(f"Loading {label}…"):
     df = fetch_history(ticker, period, interval)
+
+if df.empty:
+    st.error("No data returned from Yahoo Finance.")
+    st.stop()
 
 # -------------------------------------------------------------------
 # Metrics
 # -------------------------------------------------------------------
-def metrics_from_df(df: pd.DataFrame) -> dict:
-    if df.empty or "Close" not in df.columns:
-        return dict.fromkeys(["last", "chg", "chg_pct", "hi", "lo", "vol"])
+close = df["Close"]
+last = close.iloc[-1]
+prev = close.iloc[-2] if len(close) > 1 else None
 
-    close = df["Close"].dropna()
-    if len(close) == 0:
-        return dict.fromkeys(["last", "chg", "chg_pct", "hi", "lo", "vol"])
+chg = last - prev if prev is not None else None
+chg_pct = (chg / prev * 100) if prev not in (None, 0) else None
 
-    last = float(close.iloc[-1].item())
-    prev = float(close.iloc[-2].item()) if len(close) >= 2 else None
-
-    chg = (last - prev) if prev is not None else None
-    chg_pct = (chg / prev * 100.0) if prev not in (None, 0.0) else None
-
-    hi = float(df["High"].max().item()) if "High" in df.columns else None
-    lo = float(df["Low"].min().item()) if "Low" in df.columns else None
-    vol = (
-        float(df["Volume"].iloc[-1].item())
-        if "Volume" in df.columns and not df["Volume"].empty
-        else None
-    )
-
-    return {
-        "last": last,
-        "chg": chg,
-        "chg_pct": chg_pct,
-        "hi": hi,
-        "lo": lo,
-        "vol": vol,
-    }
-
-m = metrics_from_df(df)
+hi = df["High"].max()
+lo = df["Low"].min()
 
 c1, c2, c3, c4, c5 = st.columns(5)
-c1.metric("Last", "—" if m["last"] is None else f"{m['last']:,.2f}")
-c2.metric("Change", "—" if m["chg"] is None else f"{m['chg']:,.2f}")
-c3.metric("Change %", "—" if m["chg_pct"] is None else f"{m['chg_pct']:.2f}%")
-c4.metric("Period High", "—" if m["hi"] is None else f"{m['hi']:,.2f}")
-c5.metric("Period Low", "—" if m["lo"] is None else f"{m['lo']:,.2f}")
+c1.metric("Last", f"{last:,.2f}")
+c2.metric("Change", f"{chg:,.2f}" if chg is not None else "—")
+c3.metric("Change %", f"{chg_pct:.2f}%" if chg_pct is not None else "—")
+c4.metric("Period High", f"{hi:,.2f}")
+c5.metric("Period Low", f"{lo:,.2f}")
 
 st.caption(f"Last refresh: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}")
 
 # -------------------------------------------------------------------
-# Chart
+# Chart (THIS IS THE KEY FIX)
 # -------------------------------------------------------------------
-if df.empty:
-    err = df.attrs.get("error") if hasattr(df, "attrs") else None
-    st.error(
-        f"No data returned for {label} ({ticker}).\n\n"
-        + (f"Details: {err}" if err else "")
-    )
-    st.stop()
-
 fig = go.Figure()
 
-if show_ohlc and {"Open", "High", "Low", "Close"}.issubset(df.columns):
+if show_ohlc:
     fig.add_trace(
         go.Candlestick(
-            x=df.index,
+            x=df["Date"],
             open=df["Open"],
             high=df["High"],
             low=df["Low"],
@@ -186,7 +144,7 @@ if show_ohlc and {"Open", "High", "Low", "Close"}.issubset(df.columns):
 else:
     fig.add_trace(
         go.Scatter(
-            x=df.index,
+            x=df["Date"],
             y=df["Close"],
             mode="lines",
             name=label,
@@ -195,26 +153,29 @@ else:
     )
 
 fig.update_layout(
-    height=650,
-    margin=dict(l=20, r=20, t=40, b=40),
     template="plotly_dark",
+    height=600,
     hovermode="x unified",
     dragmode="zoom",
+    margin=dict(l=30, r=30, t=40, b=40),
     xaxis=dict(
         title="Date",
+        type="date",
+        showgrid=False,
         rangeslider=dict(visible=False),
+        tickformat="%b %d\n%Y",
         showspikes=True,
         spikemode="across",
         spikesnap="cursor",
-        tickformat="%b %d",
     ),
     yaxis=dict(
         title="Price",
         side="right",
+        showgrid=False,
+        tickformat=",.2f",
         showspikes=True,
         spikemode="across",
         spikesnap="cursor",
-        tickformat=",.2f",
     ),
 )
 
@@ -236,17 +197,9 @@ colA, colB = st.columns([1, 1])
 with colA:
     if show_volume and "Volume" in df.columns:
         st.subheader("Volume")
-        st.bar_chart(df["Volume"].fillna(0))
+        st.bar_chart(df.set_index("Date")["Volume"])
 
 with colB:
     st.subheader("Stats")
-
-    if "Close" in df.columns and not df["Close"].dropna().empty:
-        desc = df["Close"].describe()
-        if isinstance(desc, pd.Series):
-            stats = desc.to_frame(name="Close")
-        else:
-            stats = desc
-        st.dataframe(stats, width="stretch")
-    else:
-        st.info("No statistics available for this selection.")
+    stats = df["Close"].describe().to_frame(name="Close")
+    st.dataframe(stats, width="stretch")
