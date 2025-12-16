@@ -273,16 +273,31 @@ if not measure_mode:
 
 selected_points = None
 
+# streamlit-plotly-events can be flaky with Candlestick traces depending on version.
+# For reliable Δ measurement, we use a simple Close line chart in measurement mode.
+event_fig = fig
+if measure_mode:
+    event_fig = go.Figure()
+    event_fig.add_trace(
+        go.Scatter(
+            x=df["Date"],
+            y=df["Close"].astype(float),
+            mode="lines",
+            name=f"{label} (Close)",
+        )
+    )
+    event_fig.update_layout(fig.layout)
+    event_fig.update_layout(dragmode="select")
+
 if measure_mode and plotly_events is not None:
     # Some versions of streamlit-plotly-events are picky about override_width types.
     # Also: never let the chart disappear — always have a fallback render.
     try:
         selected_points = plotly_events(
-            fig,
+            event_fig,
             select_event=True,
             click_event=False,
             override_height=600,
-            override_width=1100,  # must be an int for many versions
             key=f"plotly-{ticker}-{period}-{interval}-{show_ohlc}-{measure_mode}",
         )
     except Exception as e:
@@ -290,10 +305,6 @@ if measure_mode and plotly_events is not None:
         st.plotly_chart(fig, width="stretch", config=chart_config)
         selected_points = None
 else:
-    st.plotly_chart(fig, width="stretch", config=chart_config)
-
-# If measure_mode is on but the component returned nothing, still show a normal chart
-if measure_mode and plotly_events is not None and selected_points is None:
     st.plotly_chart(fig, width="stretch", config=chart_config)
 
 # If user selected a range of candles/points, compute delta
@@ -323,7 +334,7 @@ if selected_points:
     else:
         st.info("Drag-select at least two points to compute Δ.")
 elif measure_mode and plotly_events is not None:
-    st.caption("Tip: drag a box over candles to measure Δ. Toggle off to return to pan.")
+    st.caption("Tip: drag a box over the line to measure Δ. Toggle off to return to the candlestick view.")
 
 # -------------------------------------------------------------------
 # Volume + Stats
