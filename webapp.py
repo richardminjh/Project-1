@@ -383,16 +383,16 @@ html = f"""
     Plotly.relayout(gd, {{ 'yaxis.range': [y0, y1] }});
   }}
 
-  function setDeltaText(start, end) {{
-    if (!start || !end) {{ deltaBox.textContent = 'Δ: —'; return; }}
+  function setDeltaText(start, end) {
+    if (!start || !end) { deltaBox.textContent = 'Δ: —'; return; }
     const dAbs = end.p - start.p;
     const dPct = start.p !== 0 ? (dAbs / start.p) * 100.0 : NaN;
     const s0 = new Date(start.x).toLocaleString();
     const s1 = new Date(end.x).toLocaleString();
     const absStr = (dAbs >= 0 ? '+' : '') + dAbs.toFixed(2);
     const pctStr = (dPct >= 0 ? '+' : '') + dPct.toFixed(2) + '%';
-    deltaBox.textContent = `Δ: ${absStr} (${pctStr}) • ${s0} → ${s1}`;
-  }}
+    deltaBox.textContent = 'Δ: ' + absStr + ' (' + pctStr + ') • ' + s0 + ' → ' + s1;
+  }
 
   function drawDelta(start, end) {{
     if (!start || !end) return;
