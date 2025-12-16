@@ -188,7 +188,13 @@ with colB:
 
     if "Close" in df.columns and not df["Close"].dropna().empty:
         desc = df["Close"].describe()
-        stats = desc.to_frame(name="Close")
-        st.dataframe(stats, use_container_width=True)
+
+        # Pandas may return Series or DataFrame depending on version / dtype
+        if isinstance(desc, pd.Series):
+            stats = desc.to_frame(name="Close")
+        else:
+            stats = desc.rename(columns={"Close": "Close"}) if "Close" in desc.columns else desc
+
+        st.dataframe(stats, width="stretch")
     else:
         st.info("No statistics available for this selection.")
