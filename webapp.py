@@ -708,7 +708,7 @@ with chart_col:
     html = html.replace("{{", "{").replace("}}", "}")
     # Inject the Python payload JSON into the JS placeholder
     html = html.replace("__PAYLOAD__", json.dumps(payload))
-    components.html(html, height=640, scrolling=False)
+    components.html(html, height=600, scrolling=False)
 
 # -------------------------------------------------------------------
 # Stats (prettier + more useful)
