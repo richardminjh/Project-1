@@ -7,6 +7,7 @@ from typing import Dict
 
 import pandas as pd
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import streamlit as st
 import yfinance as yf
 
@@ -181,30 +182,62 @@ st.caption(f"Last refresh: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:
 # -------------------------------------------------------------------
 # Chart (THIS IS THE KEY FIX)
 # -------------------------------------------------------------------
-fig = go.Figure()
-
-if show_ohlc:
-    fig.add_trace(
-        go.Candlestick(
-            x=df["Date"].astype("datetime64[ns]"),
-            open=df["Open"].astype(float),
-            high=df["High"].astype(float),
-            low=df["Low"].astype(float),
-            close=df["Close"].astype(float),
-            name=label,
-            increasing_line_color="#26a69a",
-            decreasing_line_color="#ef5350",
-        )
+# Build a 2-row chart when volume is enabled (price on top, volume below)
+if show_volume and "Volume" in df.columns:
+    fig = make_subplots(
+        rows=2,
+        cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.03,
+        row_heights=[0.72, 0.28],
     )
 else:
+    fig = go.Figure()
+
+if show_ohlc:
+    candle = go.Candlestick(
+        x=df["Date"].astype("datetime64[ns]"),
+        open=df["Open"].astype(float),
+        high=df["High"].astype(float),
+        low=df["Low"].astype(float),
+        close=df["Close"].astype(float),
+        name=label,
+        increasing_line_color="#26a69a",
+        decreasing_line_color="#ef5350",
+    )
+    if show_volume and "Volume" in df.columns:
+        fig.add_trace(candle, row=1, col=1)
+    else:
+        fig.add_trace(candle)
+else:
+    line = go.Scatter(
+        x=df["Date"],
+        y=df["Close"],
+        mode="lines",
+        name=label,
+        line=dict(color="#42a5f5", width=2),
+    )
+    if show_volume and "Volume" in df.columns:
+        fig.add_trace(line, row=1, col=1)
+    else:
+        fig.add_trace(line)
+
+# Volume panel (pro): embedded in the same Plotly figure
+if show_volume and "Volume" in df.columns:
+    vol_colors = [
+        "#26a69a" if float(c) >= float(o) else "#ef5350"
+        for o, c in zip(df["Open"].astype(float), df["Close"].astype(float))
+    ]
     fig.add_trace(
-        go.Scatter(
+        go.Bar(
             x=df["Date"],
-            y=df["Close"],
-            mode="lines",
-            name=label,
-            line=dict(color="#42a5f5", width=2),
-        )
+            y=df["Volume"].astype(float),
+            name="Volume",
+            marker=dict(color=vol_colors),
+            opacity=0.65,
+        ),
+        row=2,
+        col=1,
     )
 
 # Format x-axis labels based on interval
@@ -218,12 +251,12 @@ else:
 fig.update_layout(
     template="plotly_dark",
     uirevision=f"{ticker}-{period}-{interval}-{show_ohlc}",
-    height=600,
+    height=720,
     hovermode="x unified",
     dragmode="pan",
     margin=dict(l=30, r=30, t=40, b=40),
     xaxis=dict(
-        title="Date",
+        # title="Date",  # removed for subplot case
         type="date",
         autorange=True,
         showgrid=False,
@@ -247,9 +280,16 @@ fig.update_layout(
     ),
 )
 
+# Label subplot axes when volume is enabled
+if show_volume and "Volume" in df.columns:
+    fig.update_yaxes(title_text="Price", row=1, col=1)
+    fig.update_yaxes(title_text="Volume", row=2, col=1, tickformat=".2s")
+    fig.update_xaxes(title_text="", row=1, col=1)
+    fig.update_xaxes(title_text="Date", row=2, col=1)
+
 # Pro chart only
 st.subheader("Pro Chart (Yahoo-style)")
-st.caption("Hard range locks • Auto y-axis refit • Click-drag Δ measurement (drag on blank space pans)")
+st.caption("Hard range locks • Auto y-axis refit • Left-drag pan • Right-drag Δ measurement")
 
 # Serialize Plotly figure for the JS component
 fig_json = fig.to_json()
@@ -495,10 +535,26 @@ html = """
   gd.on('plotly_hover', (ev) => {
     if (!ev || !ev.points || !ev.points.length) return;
     const p = ev.points[0];
-    // p.x can be Date/string, p.y is value
-    hoverPoint = { x: p.x, p: p.y };
+
+    // Ignore volume trace for Δ measurement
+    if (p && p.data && p.data.name === 'Volume') {
+      hoverPoint = null;
+      return;
+    }
+
+    // For candlesticks, p.y can be undefined/NaN. Use underlying Close series via pointNumber.
+    let price = p.y;
+    if ((price === undefined || price === null || Number.isNaN(price)) && (p.pointNumber !== undefined && p.pointNumber !== null)) {
+      const idx = p.pointNumber;
+      if (payload.close && idx >= 0 && idx < payload.close.length) {
+        price = payload.close[idx];
+      }
+    }
+
+    hoverPoint = { x: p.x, p: price };
+
     if (measuring) {
-      deltaEnd = { x: p.x, p: p.y };
+      deltaEnd = { x: p.x, p: price };
       drawDelta(deltaStart, deltaEnd);
       setDeltaText(deltaStart, deltaEnd);
     }
@@ -509,8 +565,20 @@ html = """
   });
 
   gd.addEventListener('mousedown', (evt) => {
-    // Left click (button 0): measure Δ only if hovering a data point
+    // Left click (button 0): PAN
     if (evt.button === 0) {
+      const xr = gd._fullLayout && gd._fullLayout.xaxis && gd._fullLayout.xaxis.range;
+      if (!xr || xr.length !== 2) return;
+      panning = true;
+      panStartX = evt.clientX;
+      panStartRange = [new Date(xr[0]).getTime(), new Date(xr[1]).getTime()];
+      evt.preventDefault();
+      evt.stopPropagation();
+      return;
+    }
+
+    // Right click (button 2): MEASURE Δ (only if hovering a data point)
+    if (evt.button === 2) {
       if (hoverPoint) {
         measuring = true;
         deltaStart = hoverPoint;
@@ -521,17 +589,6 @@ html = """
         evt.stopPropagation();
       }
       return;
-    }
-
-    // Right click (button 2): pan
-    if (evt.button === 2) {
-      const xr = gd._fullLayout && gd._fullLayout.xaxis && gd._fullLayout.xaxis.range;
-      if (!xr || xr.length !== 2) return;
-      panning = true;
-      panStartX = evt.clientX;
-      panStartRange = [new Date(xr[0]).getTime(), new Date(xr[1]).getTime()];
-      evt.preventDefault();
-      evt.stopPropagation();
     }
   }, true);
 
@@ -598,25 +655,15 @@ html = html.replace("__PAYLOAD__", json.dumps(payload))
 components.html(html, height=690, scrolling=False)
 
 # -------------------------------------------------------------------
-# Volume + Stats
+# Stats
 # -------------------------------------------------------------------
-colA, colB = st.columns([1, 1])
+st.subheader("Stats")
 
-with colA:
-    if show_volume and "Volume" in df.columns:
-        st.subheader("Volume")
-        vol = df[["Date", "Volume"]].dropna()
-        vol = vol.set_index("Date")["Volume"]
-        st.bar_chart(vol)
+desc = df["Close"].describe()
 
-with colB:
-    st.subheader("Stats")
+if isinstance(desc, pd.Series):
+    stats = desc.to_frame(name="Close")
+else:
+    stats = desc.rename(columns={"Close": "Close"})
 
-    desc = df["Close"].describe()
-
-    if isinstance(desc, pd.Series):
-        stats = desc.to_frame(name="Close")
-    else:
-        stats = desc.rename(columns={"Close": "Close"})
-
-    st.dataframe(stats, width="stretch")
+st.dataframe(stats, width="stretch")
