@@ -319,9 +319,7 @@ if show_volume and "Volume" in df.columns:
 
 # --- Pro chart title ---
 _name = label.split(" (")[0]  # e.g. "Gold"
-_months_map = {"1M": 1, "3M": 3, "6M": 6, "1Y": 12, "2Y": 24, "5Y": 60}
-_months = _months_map.get(period_ui)
-pro_title = f"{_months} month {_name} Futures" if _months else f"{period_ui} {_name} Futures"
+pro_title = f"{period_ui} {_name} Futures"
 
 st.subheader(pro_title)
 st.caption("Hard range locks • Auto y-axis refit • Left-drag pan • Right-drag Δ measurement")
@@ -690,15 +688,120 @@ html = html.replace("__PAYLOAD__", json.dumps(payload))
 components.html(html, height=780, scrolling=False)
 
 # -------------------------------------------------------------------
-# Stats
+# Stats (prettier + more useful)
 # -------------------------------------------------------------------
-st.subheader("Stats")
+st.markdown("""
+<style>
+  .stats-wrap { margin-top: 10px; padding: 14px 14px 10px 14px; border-radius: 14px;
+    border: 1px solid rgba(255,255,255,0.08);
+    background: linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02));
+  }
+  .stats-title { font-size: 22px; font-weight: 800; margin: 0 0 10px 0; }
+  .stats-sub { color: rgba(255,255,255,0.70); font-size: 12px; margin: 0 0 14px 0; }
+</style>
+""", unsafe_allow_html=True)
 
-desc = df["Close"].describe()
+st.markdown(
+    f"""
+<div class="stats-wrap">
+  <div class="stats-title">Stats</div>
+  <div class="stats-sub">Baked from the currently selected series (period={period_ui}, interval={interval_ui}).</div>
+</div>
+""",
+    unsafe_allow_html=True,
+)
 
-if isinstance(desc, pd.Series):
-    stats = desc.to_frame(name="Close")
+# --- core series ---
+_close = df["Close"].astype(float).dropna()
+_ret = _close.pct_change().dropna()
+
+if interval == "1h":
+    # Rough trading assumption for futures: ~24 hourly bars per day
+    ann_factor = 252 * 24
 else:
-    stats = desc.rename(columns={"Close": "Close"})
+    ann_factor = 252
 
-st.dataframe(stats, width="stretch")
+# --- headline stats ---
+period_return = float((_close.iloc[-1] / _close.iloc[0] - 1.0)) if len(_close) >= 2 else float("nan")
+vol_ann = float(_ret.std() * (ann_factor ** 0.5)) if len(_ret) >= 2 else float("nan")
+ret_ann = float(_ret.mean() * ann_factor) if len(_ret) >= 1 else float("nan")
+sharpe_0rf = float(ret_ann / vol_ann) if (pd.notna(ret_ann) and pd.notna(vol_ann) and vol_ann != 0) else float("nan")
+
+# Max drawdown
+if len(_close) >= 2:
+    _cummax = _close.cummax()
+    _dd = _close / _cummax - 1.0
+    max_dd = float(_dd.min())
+else:
+    max_dd = float("nan")
+
+# ATR(14)
+atr14 = float("nan")
+if all(c in df.columns for c in ["High", "Low", "Close"]):
+    h = df["High"].astype(float)
+    l = df["Low"].astype(float)
+    c = df["Close"].astype(float)
+    prev_c = c.shift(1)
+    tr = pd.concat([(h - l).abs(), (h - prev_c).abs(), (l - prev_c).abs()], axis=1).max(axis=1)
+    atr14 = float(tr.rolling(14).mean().iloc[-1]) if tr.dropna().shape[0] >= 14 else float("nan")
+
+# RSI(14)
+rsi14 = float("nan")
+if len(_close) >= 15:
+    delta = _close.diff()
+    gain = delta.clip(lower=0).rolling(14).mean()
+    loss = (-delta.clip(upper=0)).rolling(14).mean()
+    rs = gain / loss.replace(0, pd.NA)
+    rsi = 100 - (100 / (1 + rs))
+    rsi14 = float(rsi.iloc[-1])
+
+# Range + last volume
+rng_abs = float(hi - lo)
+rng_pct = float((hi / lo - 1.0)) if lo != 0 else float("nan")
+last_vol = float("nan")
+if "Volume" in df.columns and not df["Volume"].dropna().empty:
+    last_vol = float(pd.to_numeric(df["Volume"], errors="coerce").dropna().iloc[-1])
+
+# --- display: finance-bro friendly tiles ---
+row1 = st.columns(6)
+row1[0].metric("Period Return", f"{period_return * 100:,.2f}%" if pd.notna(period_return) else "—")
+row1[1].metric("Ann. Vol", f"{vol_ann * 100:,.2f}%" if pd.notna(vol_ann) else "—")
+row1[2].metric("Ann. Return", f"{ret_ann * 100:,.2f}%" if pd.notna(ret_ann) else "—")
+row1[3].metric("Sharpe (0% rf)", f"{sharpe_0rf:,.2f}" if pd.notna(sharpe_0rf) else "—")
+row1[4].metric("Max Drawdown", f"{max_dd * 100:,.2f}%" if pd.notna(max_dd) else "—")
+row1[5].metric("ATR(14)", f"{atr14:,.2f}" if pd.notna(atr14) else "—")
+
+row2 = st.columns(6)
+row2[0].metric("Period High", f"{hi:,.2f}")
+row2[1].metric("Period Low", f"{lo:,.2f}")
+row2[2].metric("Range", f"{rng_abs:,.2f}")
+row2[3].metric("Range %", f"{rng_pct * 100:,.2f}%" if pd.notna(rng_pct) else "—")
+row2[4].metric("RSI(14)", f"{rsi14:,.1f}" if pd.notna(rsi14) else "—")
+row2[5].metric("Last Volume", f"{last_vol:,.0f}" if pd.notna(last_vol) else "—")
+
+st.divider()
+
+# --- distribution table (clean + readable) ---
+desc = df["Close"].describe()  # count/mean/std/min/25%/50%/75%/max
+if isinstance(desc, pd.Series):
+    stats_tbl = desc.to_frame(name="Close")
+else:
+    stats_tbl = desc.rename(columns={"Close": "Close"})
+
+# Add a couple extra rows people like
+if len(_ret) > 0:
+    stats_tbl.loc["skew"] = float(_ret.skew())
+    stats_tbl.loc["kurtosis"] = float(_ret.kurtosis())
+
+# Formatting
+stats_tbl.index = stats_tbl.index.astype(str)
+stats_tbl = stats_tbl.rename_axis("Metric")
+
+st.dataframe(
+    stats_tbl.style.format(
+        {
+            "Close": "{:,.4f}",
+        }
+    ),
+    width="stretch",
+)
