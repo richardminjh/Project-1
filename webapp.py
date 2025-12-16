@@ -283,4 +283,4 @@ with colB:
     else:
         stats = desc.rename(columns={"Close": "Close"})
 
-    st.dataframe(stats, use_container_width=True)
+    st.dataframe(stats, width="stretch")
