@@ -1,4 +1,4 @@
-name = "Richard Min"
+name = "Richard"
 age = 20
 
 print("Hello,", name)
