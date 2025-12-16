@@ -252,7 +252,7 @@ fig.update_layout(
 
 st.plotly_chart(
     fig,
-    width="stretch",
+    use_container_width=True,
     config={
         "scrollZoom": True,
         "displayModeBar": True,
@@ -310,7 +310,7 @@ with colA:
 
         st.plotly_chart(
             vfig,
-            width="stretch",
+            use_container_width=True,
             config={
                 "scrollZoom": True,
                 "displayModeBar": True,
