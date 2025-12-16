@@ -721,12 +721,17 @@ components.html(html, height=780, scrolling=False)
 # -------------------------------------------------------------------
 st.markdown("""
 <style>
-  .stats-wrap { margin-top: 10px; padding: 14px 14px 10px 14px; border-radius: 14px;
-    border: 1px solid rgba(255,255,255,0.08);
-    background: linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02));
+  .stats-wrap {
+    margin-top: 18px;
+    padding: 18px 18px 16px 18px;
+    border-radius: 16px;
+    border: 1px solid rgba(255,255,255,0.10);
+    background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
+    box-shadow: 0 10px 30px rgba(0,0,0,0.25);
   }
-  .stats-title { font-size: 22px; font-weight: 800; margin: 0 0 10px 0; }
+  .stats-title { font-size: 24px; font-weight: 850; margin: 0 0 12px 0; }
   .stats-sub { color: rgba(255,255,255,0.70); font-size: 12px; margin: 0 0 14px 0; }
+  .stats-spacer { height: 10px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -739,6 +744,7 @@ st.markdown(
 """,
     unsafe_allow_html=True,
 )
+st.markdown('<div class="stats-spacer"></div>', unsafe_allow_html=True)
 
 # --- core series ---
 _close = df["Close"].astype(float).dropna()
@@ -804,60 +810,8 @@ row2 = st.columns(6)
 row2[0].metric("Range", f"{rng_abs:,.2f}")
 row2[1].metric("Range %", f"{rng_pct * 100:,.2f}%" if pd.notna(rng_pct) else "—")
 row2[2].metric("RSI(14)", f"{rsi14:,.1f}" if pd.notna(rsi14) else "—")
-row2[3].metric("ATR(14)", f"{atr14:,.2f}" if pd.notna(atr14) else "—")
+row2[3].metric("Last Volume", f"{last_vol:,.0f}" if pd.notna(last_vol) else "—")
 row2[4].metric("Skew (rets)", f"{float(_ret.skew()):,.2f}" if len(_ret) > 5 else "—")
 row2[5].metric("Kurtosis (rets)", f"{float(_ret.kurtosis()):,.2f}" if len(_ret) > 5 else "—")
 
-st.divider()
-
-# --- distribution table (clean + readable) ---
-desc = df["Close"].describe()  # count/mean/std/min/25%/50%/75%/max
-if isinstance(desc, pd.Series):
-    stats_tbl = desc.to_frame(name="Close")
-else:
-    stats_tbl = desc.rename(columns={"Close": "Close"})
-
-# Add a couple extra rows people like
-if len(_ret) > 0:
-    stats_tbl.loc["skew"] = float(_ret.skew())
-    stats_tbl.loc["kurtosis"] = float(_ret.kurtosis())
-
-# Formatting
-stats_tbl.index = stats_tbl.index.astype(str)
-stats_tbl = stats_tbl.rename_axis("Metric")
-
-# Make the table readable (rounded + nice labels)
-stats_show = stats_tbl.copy()
-
-if "Close" in stats_show.columns:
-    for idx in stats_show.index:
-        try:
-            v = float(stats_show.loc[idx, "Close"])
-        except Exception:
-            continue
-
-        if str(idx) == "count":
-            stats_show.loc[idx, "Close"] = int(round(v))
-        else:
-            stats_show.loc[idx, "Close"] = round(v, 2)
-
-pretty_index = {
-    "count": "Count",
-    "mean": "Mean",
-    "std": "Std Dev",
-    "min": "Min",
-    "25%": "25%",
-    "50%": "Median (50%)",
-    "75%": "75%",
-    "max": "Max",
-    "skew": "Skew (returns)",
-    "kurtosis": "Kurtosis (returns)",
-}
-stats_show = stats_show.rename(index=pretty_index)
-stats_show = stats_show.rename_axis("Metric")
-
-st.dataframe(
-    stats_show,
-    width="stretch",
-    hide_index=False,
-)
+st.caption("Tip: metrics are computed from the displayed series (simple returns).")
