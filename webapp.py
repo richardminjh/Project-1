@@ -148,10 +148,6 @@ if df.empty:
     st.error("No data returned from Yahoo Finance.")
     st.stop()
 
-# Hard bounds for the x-axis (prevents infinite panning/zooming)
-x_min = df["Date"].min()
-x_max = df["Date"].max()
-
 # -------------------------------------------------------------------
 # Metrics
 # -------------------------------------------------------------------
@@ -227,8 +223,6 @@ fig.update_layout(
         title="Date",
         type="date",
         autorange=True,
-        minallowed=x_min,
-        maxallowed=x_max,
         showgrid=False,
         rangeslider=dict(visible=False),
         tickformat=x_tickformat,
@@ -252,7 +246,7 @@ fig.update_layout(
 
 st.plotly_chart(
     fig,
-    use_container_width=True,
+    width="stretch",
     config={
         "scrollZoom": True,
         "displayModeBar": True,
@@ -275,55 +269,9 @@ colA, colB = st.columns([1, 1])
 with colA:
     if show_volume and "Volume" in df.columns:
         st.subheader("Volume")
-
-        vfig = go.Figure()
-        vfig.add_trace(
-            go.Bar(
-                x=df["Date"],
-                y=df["Volume"].astype(float),
-                name="Volume",
-                marker_color="#546e7a",
-            )
-        )
-
-        vfig.update_layout(
-            template="plotly_dark",
-            uirevision=f"{ticker}-{period}-{interval}-vol",
-            height=250,
-            margin=dict(l=30, r=30, t=30, b=30),
-            dragmode="pan",
-            xaxis=dict(
-                type="date",
-                autorange=True,
-                minallowed=x_min,
-                maxallowed=x_max,
-                showgrid=False,
-                fixedrange=False,
-                rangeslider=dict(visible=False),
-            ),
-            yaxis=dict(
-                showgrid=False,
-                fixedrange=False,
-                title="Volume",
-            ),
-        )
-
-        st.plotly_chart(
-            vfig,
-            use_container_width=True,
-            config={
-                "scrollZoom": True,
-                "displayModeBar": True,
-                "displaylogo": False,
-                "modeBarButtonsToRemove": [
-                    "zoom2d",
-                    "select2d",
-                    "lasso2d",
-                    "zoomIn2d",
-                    "zoomOut2d",
-                ],
-            },
-        )
+        vol = df[["Date", "Volume"]].dropna()
+        vol = vol.set_index("Date")["Volume"]
+        st.bar_chart(vol)
 
 with colB:
     st.subheader("Stats")
@@ -335,4 +283,4 @@ with colB:
     else:
         stats = desc.rename(columns={"Close": "Close"})
 
-    st.dataframe(stats, width="stretch")
+    st.dataframe(stats, use_container_width=True)
