@@ -791,7 +791,7 @@ with stats_col:
           .stat-k { font-size: 13.5px; opacity: 0.86; margin-bottom: 7px; }
             .stat-v { font-size: 25px; font-weight: 850; line-height: 1.05; }
           .stats-tip {
-            margin-top: 4px;               /* move tip up slightly */
+            margin-top: 10px;               /* move tip up slightly */
             font-size: 11px;
             opacity: 0.65;
             padding-bottom: 0px;
