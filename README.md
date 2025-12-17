@@ -1,6 +1,6 @@
 # Commodities Dashboard
 
-This is an interactive commodities futures dashboard using Yahoo Finance data (via yfinance) + Plotly + Streamlit.
+A Yahoo-style commodities dashboard using Streamlit, Plotly, and yfinance. Features include candlestick/line charts, embedded volume, custom pan/zoom controls, right-click delta measurement, auto y-axis refitting, CSV/PNG export, and performance statistics (returns, volatility, Sharpe, drawdown, RSI).
 
 ## To Run locally
 ```bash
